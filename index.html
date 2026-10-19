@@ -312,6 +312,8 @@ textarea.field{min-height:84px;resize:vertical;font-size:.85em}
   38%,58%{transform:translate3d(12px,-5px,0) rotate(.4deg)}
   48%{transform:translate3d(-9px,3px,0)}
 }
+@keyframes mTitleIn{from{opacity:0;transform:scale(.7) translateY(30px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes mSubIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 
 /* 背诵中的 +1 飘字 */
 .float{position:fixed;z-index:41;pointer-events:none;font-weight:900;font-size:1.06em;transform:translate(-50%,-50%);white-space:nowrap;animation:floatUp .9s cubic-bezier(.2,.8,.3,1) forwards;text-shadow:0 2px 12px rgba(0,0,0,.22)}
@@ -322,6 +324,7 @@ textarea.field{min-height:84px;resize:vertical;font-size:.85em}
   #done.go #done-title span,#done.go .stamp,#done.go .big3 .stat,#done.go .legend,#done.go .actions{animation:none}
   #done .stack i{transition:none}
   .float{animation:none;opacity:0}
+  [style*="animation:mTitleIn"],[style*="animation:mSubIn"]{animation:none;opacity:1}
 }
 </style>
 </head>
@@ -1025,11 +1028,15 @@ if (!S.msS.bio) S.msS.bio = Object.assign({}, S.ms);
 if (!S.msS.mic) S.msS.mic = {};
 S.water = S.water || {};
 S.water.cups = S.water.cups || {};
+S.skipped = S.skipped || {};
+S.totalMs = S.totalMs || 0;
+S.milestoneAt = S.milestoneAt || 0;
 S.set = Object.assign({}, DEF, S.set || {});
 if ((S.set.v || 0) < 3) { if ((S.set.v || 0) < 2 && (S.set.idle === 45 || S.set.idle === 30)) S.set.idle = 90; S.set.v = 3; S.set.mode = 'stage'; }
 if (S.set.v < 4) { S.set.v = 4; S.set.chaps = []; S.set.topics = []; }
 if (S.set.v < 5) { S.set.v = 5; if (S.set.order === 'due') S.set.order = 'few'; }
 if (S.set.v < 6) { S.set.v = 6; if (!SUBJ[S.set.subj]) S.set.subj = 'bio'; }
+if (S.set.v < 7) { S.set.v = 7; }
 // 旧版是“掌握等级”，改成“背过几次”：r=背过次数，g=最近一次的结果，t=最近一次时间
 function migrate(rec) {
   if (rec && rec.r === undefined) {
@@ -1089,6 +1096,8 @@ function inScope(c, ignoreChap, st) {
   if (st.subj && c.sub !== st.subj) return false;
   if (st.only === 'star' && !S.stars[c.id]) return false;
   if (st.only === 'wrong' && !isWrong(S.cards[c.id])) return false;
+  if (st.only === 'skipped' && !S.skipped[c.id]) return false;
+  if (st.only !== 'skipped' && S.skipped[c.id]) return false;
   if (st.part === 'hb') { if (c.p === 2) return false; }
   else if (st.part !== 'all' && String(c.p) !== st.part) return false;
   if (st.sect !== 'all' && String(c.s) !== st.sect) return false;
@@ -1131,7 +1140,7 @@ function renderHome() {
   const total = P.length;
   $('#hero-title').textContent = total ? '先背 ' + Math.min(n, total) + ' 题，然后休息' : '这个范围里没有题';
   let sub;
-  if (!total) sub = S.set.only === 'star' ? '还没有收藏的题。背的时候点“收藏”就会出现在这里。' : S.set.only === 'wrong' ? '范围内没有错题。最近一次选了“忘记”或“模糊”的题会进错题本，之后选“记得”就出来了。' : '换一个范围试试：比如把章节全选。';
+  if (!total) sub = S.set.only === 'star' ? '还没有收藏的题。背的时候点"收藏"就会出现在这里。' : S.set.only === 'wrong' ? '范围内没有错题。最近一次选了"忘记"或"模糊"的题会进错题本，之后选"记得"就出来了。' : S.set.only === 'skipped' ? '没有已跳过的题。背的时候点"跳过"就会出现在这里。' : '换一个范围试试：比如把章节全选。';
   else if (fresh) sub = '还有 ' + fresh + ' 题一次都没背过' + (few ? '，' + few + ' 题只背过 1 次' : '') + '。';
   else sub = '范围内的题都背过了，平均每题背过 ' + (sum / total).toFixed(1) + ' 次。' + (few ? '其中 ' + few + ' 题只背过 1 次。' : '');
   $('#hero-sub').textContent = sub;
@@ -1149,7 +1158,7 @@ function renderHome() {
     : PP === '2' ? seg('sect', [['all','全部题型'],['2','填空'],['3','判断']])
     : PP === 'all' ? seg('sect', [['all','全部'],['0','名词解释'],['1','问答题'],['2','填空'],['3','判断']], 'w')
     : seg('sect', [['all','全部题型'],['0','名词解释'],['1','问答题']]);
-  $('#only-seg').innerHTML = seg('only', [['all','全部题'],['wrong','只练错题'],['star','只练收藏']]);
+  $('#only-seg').innerHTML = seg('only', [['all','全部题'],['wrong','只练错题'],['star','只练收藏'],['skipped','已跳过']]);
   $('#order-seg').innerHTML = seg('order', [['few','少背的优先'],['seq','按章节顺序'],['rand','随机']]);
   const smallOnly = !mic && S.set.part === '2';
   $('#mode-seg').innerHTML = smallOnly ? '' : seg('mode', [['stage','先背后提示'],['cloze','直接挖空'],['recall','整题回忆']]);
@@ -1169,11 +1178,13 @@ function renderHome() {
   const today = dk(), goal = S.set.goal;
   const doneToday = (S.slog[S.set.subj] || {})[today] || 0;
   const mins = Math.round(((S.msS[S.set.subj] || {})[today] || 0) / 60000);
+  const skippedN = SC.filter(c => S.skipped[c.id]).length;
   let st = '<div class="stat' + (goal && doneToday >= goal ? ' hit' : '') + '"><b>' + doneToday + (goal ? ' / ' + goal : '') + '</b><span>今天背过几题</span></div>' +
     '<div class="stat"><b>' + streak() + ' 天</b><span>连续背诵</span></div>' +
     '<div class="stat"><b>' + mins + ' 分钟</b><span>今天学了多久</span></div>' +
     '<div class="stat"><b>' + seen + ' / ' + SC.length + '</b><span>背过的题</span></div>' +
-    '<div class="stat"><b>' + times + ' 次</b><span>累计背过</span></div>';
+    '<div class="stat"><b>' + times + ' 次</b><span>累计背过</span></div>' +
+    '<div class="stat"><b>' + skippedN + '</b><span>已跳过</span></div>';
   const bk = [0, 0, 0, 0], cols = ['var(--line)', 'var(--warn)', 'var(--accent)', 'var(--good)'], labs = ['0 次', '1 次', '2 次', '3 次以上'];
   for (const c of SC) bk[Math.min(3, reps(c.id))]++;
   const denom = Math.max(1, SC.length);
@@ -1279,7 +1290,7 @@ function startSession(n, scope) {
   const q = buildQueue(n, scope);
   if (!q.length) return;
   combo = 0;
-  ses = {queue:q.slice(), units:q.slice(), i:0, res:{}, rq:{}, totalMs:0, cardMs:0, lockMs:0, limit:0, idleN:0, awayN:0, paused:false, lastTick:Date.now(), shown:'none', done:false, n:n, scope:scope || null, token:0};
+  ses = {queue:q.slice(), units:q.slice(), i:0, res:{}, rq:{}, totalMs:0, cardMs:0, lockMs:0, limit:0, idleN:0, awayN:0, paused:false, lastTick:Date.now(), shown:'none', done:false, n:n, scope:scope || null, token:0, aborted:false};
   show('study'); wake(S.set.awake);
   ses.numeric = ses.units.length > 24;
   $('#segs').className = ses.numeric ? 'num' : '';
@@ -1309,10 +1320,11 @@ function showCard() {
   ses.shown = ses.mode === 'cloze' ? 'cloze' : 'none';
   ses.cardMs = 0; ses.lockMs = (c.s >= 2 ? Math.min(S.set.lock, 1) : S.set.lock) * 1000; ses.limit = limitFor(c);
   const cloze = ses.shown === 'cloze', retry = (ses.rq[c.id] || 0) > 0, small = c.s >= 2;
+  const skipLabel = S.set.only === 'skipped' ? '恢复这题' : '跳过这题';
   $('#card').innerHTML =
     '<div class="meta"><span>' + esc(where(c)) + '</span><span class="tags"><span class="tag">' + SECT[c.s] + '</span><span class="tag' + (c.p === 0 ? ' must' : '') + '">' + PART[c.p] + '</span>' + (retry ? '<span class="tag again">再来一次</span>' : '') + '</span></div>' +
     (c.s === 2 ? '<h2 class="q fill" id="fillq">' + gapHtml(c) + '</h2>' : '<h2 class="q' + (c.s === 3 ? ' sm' : '') + '">' + esc(c.q) + '</h2>') +
-    '<div class="tools"><button type="button" id="btn-say">朗读</button><button type="button" id="btn-skip">跳过这题</button><button type="button" id="btn-star">' + starLabel(c) + '</button></div>' +
+    '<div class="tools"><button type="button" id="btn-say">朗读</button><button type="button" id="btn-skip">' + skipLabel + '</button><button type="button" id="btn-star">' + starLabel(c) + '</button></div>' +
     (!small && S.set.mode !== 'cloze' && S.set.write ? '<textarea id="note" placeholder="先写下你记得的要点，关键词就行" aria-label="默写"></textarea>' : '') +
     '<div id="answer"' + (cloze ? '' : ' hidden') + '>' + (cloze ? answerBlock(c, true) : '') + '</div>';
   $('#timer').hidden = !ses.limit;
@@ -1474,7 +1486,14 @@ function skip() {
   if (!ses || ses.done) return;
   stopSpeak(); sfx.skip();
   const c = ses.cur;
-  if (!ses.res[c.id]) ses.res[c.id] = 's';
+  if (S.set.only === 'skipped') {
+    delete S.skipped[c.id]; save();
+    popAt('#btn-skip', '已恢复', 'var(--good)');
+    sfx.good(1);
+  } else {
+    if (!ses.res[c.id]) ses.res[c.id] = 's';
+    S.skipped[c.id] = true; save();
+  }
   ses.i++;
   if (ses.i >= ses.queue.length) finish(); else { showCard(); updateSegs(); }
 }
@@ -1514,7 +1533,7 @@ function grade(g) {
   if (ses.i >= ses.queue.length) finish(); else showCard();
   if (!ses.done) updateSegs();
 }
-$('#btn-quit').addEventListener('click', () => { if (ses && !ses.done) finish(); });
+$('#btn-quit').addEventListener('click', () => { if (ses && !ses.done) { ses.aborted = true; finish(); } });
 
 /* timer + idle */
 setInterval(() => {
@@ -1524,9 +1543,11 @@ setInterval(() => {
   if (ses.paused) return;
   ses.totalMs += dt;
   S.ms[dk()] = (S.ms[dk()] || 0) + dt;
+  S.totalMs = (S.totalMs || 0) + dt;
   const sb = ses.cur && ses.cur.sub;
   if (sb) { const m = S.msS[sb] || (S.msS[sb] = {}); m[dk()] = (m[dk()] || 0) + dt; }
   if (++msTick % 50 === 0) save();
+  if (msTick % 15 === 0) checkMilestones();
   if (timing()) {
     ses.cardMs += dt;
     if (ses.lockMs > 0) { ses.lockMs = Math.max(0, ses.lockMs - dt); if (ses.mode === 'cloze' && ses.lockMs <= 0) renderDock(); else updateFlipBtn(); }
@@ -1535,6 +1556,49 @@ setInterval(() => {
   const idle = S.set.idle;
   if (idle > 0 && now - lastActive > idle * 1000 && !nudgeOpen && !waterOpen) openNudge('idle');
 }, 200);
+
+/* ---------- milestones ---------- */
+const MILESTONES = [30*60*1000, 60*60*1000, 2*60*60*1000, 5*60*60*1000, 10*60*60*1000];
+const MILESTONE_NAMES = ['30分钟', '1小时', '2小时', '5小时', '10小时'];
+function checkMilestones() {
+  if (!S.set.fx || !ses || ses.done || screen !== 'study') return;
+  for (let i = 0; i < MILESTONES.length; i++) {
+    const m = MILESTONES[i];
+    if (S.totalMs >= m && (S.milestoneAt || 0) < m) {
+      S.milestoneAt = m; save();
+      celebrateMilestone(MILESTONE_NAMES[i]);
+      break;
+    }
+  }
+}
+function celebrateMilestone(name) {
+  if (!S.set.fx) return;
+  const tk = FX.token();
+  const alive = () => FX.token() === tk;
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;z-index:1000;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+  el.innerHTML = '<div style="font-size:clamp(28px,6vw,56px);font-weight:800;background:linear-gradient(180deg,var(--gold1),var(--gold2),var(--gold3));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 20px rgba(255,176,0,.4));animation:mTitleIn .7s cubic-bezier(.2,1.5,.4,1) both;">累计学习 ' + esc(name) + '！</div><div style="margin-top:12px;font-size:16px;color:var(--ink2);animation:mSubIn .7s .25s cubic-bezier(.2,1.5,.4,1) both;">继续加油，下一个里程碑在向你招手</div>';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+  const W = window.innerWidth, H = window.innerHeight;
+  FX.flash(.7);
+  FX.shock(W / 2, H / 2, 380);
+  FX.shock(W / 2, H / 2, 260);
+  FX.burst(W / 2, H / 2, 60, '255,206,96', 12);
+  FX.burst(W / 2, H / 2, 40, '255,240,190', 8);
+  setTimeout(() => { if (alive()) FX.coins(60); }, 100);
+  setTimeout(() => { if (alive()) { FX.coins(40, W * .15); FX.coins(40, W * .85); } }, 350);
+  setTimeout(() => { if (alive()) FX.coins(50); }, 650);
+  setTimeout(() => { if (alive()) { FX.coins(35, W * .3); FX.coins(35, W * .7); } }, 950);
+  setTimeout(() => { if (alive()) FX.coinRain(50); }, 1300);
+  setTimeout(() => { if (alive()) FX.rain(200); }, 200);
+  setTimeout(() => { if (alive()) FX.rain(120); }, 800);
+  for (let i = 0; i < 15; i++) setTimeout(() => { if (alive()) sfx.coin(); }, 150 + i * 140);
+  sfx.level();
+  setTimeout(() => { if (alive()) { sfx.stamp(); shakeScreen(true); } }, 600);
+  setTimeout(() => { if (alive()) { sfx.perfect(); shakeScreen(true); } }, 1400);
+}
+
 ['pointerdown','keydown','touchstart','scroll','input'].forEach(ev => window.addEventListener(ev, () => { lastActive = Date.now(); }, {passive:true}));
 
 function openNudge(kind, secs) {
@@ -1918,7 +1982,7 @@ function celebrate(o) {
 
   if (perfect) done.classList.add('perfect');
 
-  if (!S.set.fx) { if (!o.res) sfx.skip(); return; }   // 关掉动画：直接看静态结算
+  if (o.aborted || !S.set.fx) { if (o.aborted || !o.res) sfx.skip(); return; }   // 提前退出或关掉动画：直接看静态结算
 
   done.classList.add('go');
   if (!o.res || lv === 0) done.classList.add('low');
@@ -2047,7 +2111,7 @@ function finish() {
     (smaller ? '<button class="ghost" id="a-again5">改成 5 题，再来一轮</button>' : '<button class="ghost" id="a-again">再来一轮（' + (ses.n ? ses.n + ' 题' : '整章') + '）</button>') +
     '<button class="ghost" id="a-home">回首页</button>';
   show('done');
-  celebrate({g:g, m:m, f:f, res:res.length, skipped:skipped, drift:drift, ms:ses.totalMs, rate:rate});
+  celebrate({g:g, m:m, f:f, res:res.length, skipped:skipped, drift:drift, ms:ses.totalMs, rate:rate, aborted:ses.aborted});
 }
 $('#done-actions').addEventListener('click', e => {
   const id = e.target.id;
@@ -2110,7 +2174,7 @@ $('#sheet-body').addEventListener('click', e => {
   }
   if (e.target.id === 'exam-clear') { S.set.exam = ''; save(); renderSheet(); renderHome(); return; }
   if (e.target.id === 'btn-exp') {
-    const data = JSON.stringify({v:2, cards:S.cards, log:S.log, stars:S.stars, ms:S.ms, slog:S.slog, msS:S.msS, water:S.water});
+    const data = JSON.stringify({v:2, cards:S.cards, log:S.log, stars:S.stars, ms:S.ms, slog:S.slog, msS:S.msS, water:S.water, skipped:S.skipped, totalMs:S.totalMs, milestoneAt:S.milestoneAt});
     $('#bk').value = data;
     try { navigator.clipboard.writeText(data).then(() => toast('已复制到剪贴板'), () => toast('请长按文本框，手动全选复制')); } catch (er) { toast('请长按文本框，手动全选复制'); }
     return;
@@ -2118,7 +2182,7 @@ $('#sheet-body').addEventListener('click', e => {
   if (e.target.id === 'btn-imp') { importBackup($('#bk').value); return; }
   if (e.target.id === 'btn-wipe') {
     if (!wipeArmed) { wipeArmed = true; renderSheet(); setTimeout(() => { wipeArmed = false; if (!$('#sheet').hidden) renderSheet(); }, 4000); }
-    else { wipeArmed = false; S.cards = {}; S.log = {}; S.stars = {}; S.ms = {}; S.slog = {bio:{}, mic:{}}; S.msS = {bio:{}, mic:{}}; S.water = {cups:{}}; save(); renderSheet(); renderHome(); }
+    else { wipeArmed = false; S.cards = {}; S.log = {}; S.stars = {}; S.ms = {}; S.slog = {bio:{}, mic:{}}; S.msS = {bio:{}, mic:{}}; S.water = {cups:{}}; S.skipped = {}; S.totalMs = 0; S.milestoneAt = 0; save(); renderSheet(); renderHome(); }
   }
 });
 const closeSheet = () => { $('#sheet').hidden = true; wipeArmed = false; };
@@ -2257,6 +2321,9 @@ function importBackup(txt) {
   for (const sb in (d.msS || {})) { const t = S.msS[sb] || (S.msS[sb] = {}); for (const k in d.msS[sb]) t[k] = Math.max(t[k] || 0, d.msS[sb][k]); }
   for (const k in (d.stars || {})) S.stars[k] = 1;
   for (const k in ((d.water && d.water.cups) || {})) S.water.cups[k] = Math.max(S.water.cups[k] || 0, d.water.cups[k]);
+  for (const k in (d.skipped || {})) S.skipped[k] = true;
+  if (d.totalMs) S.totalMs = Math.max(S.totalMs || 0, d.totalMs);
+  if (d.milestoneAt) S.milestoneAt = Math.max(S.milestoneAt || 0, d.milestoneAt);
   save(); renderHome(); toast('已导入，和这里原有的进度合并了。');
 }
 
