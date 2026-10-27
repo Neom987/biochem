@@ -217,6 +217,21 @@ textarea#note:read-only{opacity:.85}
 .water-card .seg{margin-top:8px}
 .stats{grid-template-columns:repeat(2,1fr)}
 .stat.hit b{color:var(--good)}
+
+/* 考前估算卡片 */
+.fc{margin-top:12px;background:var(--surface);border-radius:18px;padding:14px 14px 12px;box-shadow:var(--shadow)}
+.fc h4{margin:0 0 4px;font-size:.9em;color:var(--ink2);font-weight:700}
+.fc .big{font-size:2em;font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.fc .big em{font-style:normal;font-size:.46em;font-weight:700;color:var(--ink2);margin-left:5px}
+.fc .note{font-size:.82em;color:var(--ink2);margin:4px 0 0;line-height:1.55}
+.fc .rnds{display:flex;gap:4px;margin:12px 0 0}
+.fc .rnds i{flex:1;height:14px;border-radius:4px;background:var(--seg);overflow:hidden;position:relative}
+.fc .rnds i.f{background:var(--good)}
+.fc .rnds i.p::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--p,0%);background:var(--good);border-radius:4px}
+.fc .spark{display:flex;align-items:flex-end;gap:3px;height:46px;margin:12px 0 0}
+.fc .spark i{flex:1;background:var(--tint);border-radius:3px 3px 0 0;min-height:3px}
+.fc .spark i.t{background:var(--accent)}
+.fc .cap{display:flex;justify-content:space-between;gap:8px;font-size:.74em;color:var(--ink2);margin-top:6px}
 .res{background:var(--surface);border-radius:14px;margin:8px 0;padding:10px 12px}
 .res summary{cursor:pointer;font-weight:700;line-height:1.5}
 .res .rm{display:block;font-weight:400;color:var(--ink2);font-size:.8em}
@@ -407,7 +422,9 @@ textarea.field{min-height:84px;resize:vertical;font-size:.85em}
       <div class="block">
       <h3>我的进度</h3>
       <div class="stats" id="stats"></div>
+      <p class="src" id="mhint"></p>
       <div id="dist"></div>
+      <div id="forecast"></div>
       <p class="src">题目来自《求臻 2027 生物化学背诵手册（简洁版）》《生物化学小题狂背》（填空、判断）和《微生物学背诵笔记》。两科的背诵进度、用时、统计完全分开，都只保存在这台设备的浏览器里。</p>
     </div>
 
@@ -1003,6 +1020,64 @@ const SECT = ['名词解释','问答题','填空','判断'];
 const PART = ['必背','选背','小题'];
 const mk = (rows, sub) => rows.map(r => ({id:(sub === 'mic' ? 'm' : '') + r[0] + '.' + r[1] + '.' + r[2] + '.' + r[3], sub:sub, p:r[0], ch:r[1], s:r[2], no:r[3], q:r[4], a:r[5], j:r[6]}));
 const C = mk(D, 'bio').concat(mk(DM, 'mic'));
+/* 小题题库里有几道填空题，题干和答案后面粘着几十条判断题的解析（“1．正确描述：…”），
+   导致很多题的答案被塞在一道题下面。这里把它们拆回独立的判断题，填空题只留第一句。 */
+(() => {
+  const D0 = /(\d{1,2})\s*[．.、]\s*(?:正确|错误)\s*描述\s*[:：]/;
+  const D1 = /(\d{1,2})\s*[．.、]\s*(正确|错误)\s*描述\s*[:：]\s*([\s\S]*?)(?=(?:\d{1,2}\s*[．.、]\s*(?:正确|错误)\s*描述\s*[:：])|$)/g;
+  for (let i = C.length - 1; i >= 0; i--) {
+    const c = C[i];
+    if (c.s !== 2) continue;
+    const m = D0.exec(c.q); if (!m) continue;
+    const head = c.q.slice(0, m.index).trim();
+    if (head.length < 8) continue;
+    const tail = c.q.slice(m.index), add = [];
+    let prev = '', n = 0, mm;
+    D1.lastIndex = 0;
+    while ((mm = D1.exec(tail))) {
+      const t = mm[3].replace(/\s+/g, ' ').trim();
+      if (!t) continue;
+      n++;
+      const ok = mm[2] === '正确';
+      const a = ok ? [[0, '✓ 这句话是正确的。']] : [[0, '✗ 这句话是错误的。']];
+      if (!ok && prev) a.push([0, '对应的正确说法：' + prev]);
+      if (ok) prev = t;
+      add.push({id:c.id + 'j' + n, sub:c.sub, p:c.p, ch:c.ch, s:3, no:c.no * 100 + n, q:t, a:a, j:ok ? 1 : 0});
+    }
+    if (!add.length) continue;
+    const ai = c.a[0][1].search(D0);
+    if (ai > 0) c.a = [[0, c.a[0][1].slice(0, ai).trim()]];
+    c.q = head;
+    C.splice(i + 1, 0, ...add);
+  }
+})();
+/* 微生物第十章还有一道问答题，把三个问题（五界系统 / 三域学说 / 核酸分析）的答案连成了一张卡 */
+(() => {
+  const c = C.find(x => x.id === 'm1.10.1.1'); if (!c || c.a.length < 6) return;
+  const MARKS = ['何谓三域学说', '试述核酸分析'];
+  const g = [[], [], []];
+  let gi = 0;
+  for (const row of c.a) {
+    let text = row[1]; const lv = row[0];
+    for (let k = 0; k < MARKS.length; k++) {
+      const idx = text.indexOf(MARKS[k]);
+      if (idx > 0) { g[gi].push([lv, text.slice(0, idx).trim()]); gi = k + 1; text = text.slice(idx); }
+    }
+    g[gi].push([lv, text.trim()]);
+  }
+  const cutAsk = rows => {
+    const f = rows[0][1], k = f.indexOf('答：');
+    if (k < 0) return null;
+    return {q: f.slice(0, k).replace(/（高校真题）/g, '').trim(), rows: [[rows[0][0], f.slice(k + 2)]].concat(rows.slice(1))};
+  };
+  const a = cutAsk(g[1]), b = cutAsk(g[2]);
+  if (!a || !b || !g[0].length) return;
+  const i = C.indexOf(c);
+  c.a = g[0];
+  C.splice(i + 1, 0,
+    {id:c.id + 'b', sub:c.sub, p:c.p, ch:c.ch, s:c.s, no:c.no, q:a.q, a:a.rows},
+    {id:c.id + 'c', sub:c.sub, p:c.p, ch:c.ch, s:c.s, no:c.no, q:b.q, a:b.rows});
+})();
 const where = c => c.sub === 'mic' ? '微生物 · ' + MCHS[c.ch] : '生化 · ' + (c.p === 2 ? '专题 ' + c.ch + ' ' + T[c.ch] : '第 ' + c.ch + ' 章 ' + CH[c.ch]);
 const KEY = 'bio-memo-v1';
 const DEF = {subj:'bio', limit:'std', lock:3, idle:90, mode:'stage', cloze:1, only:'all', water:45, cups:8, goal:0, exam:'', awake:true, noise:'off', write:false, topics:[], autoj:true, csprint:15, chsrc:'hb', speak:false, sound:true, fx:true, fs:1, sprint:10, order:'few', part:'0', sect:'all', chaps:[], theme:'auto'};
@@ -1029,14 +1104,17 @@ if (!S.msS.mic) S.msS.mic = {};
 S.water = S.water || {};
 S.water.cups = S.water.cups || {};
 S.skipped = S.skipped || {};
+S.skipS = S.skipS || {};          // 每天跳过多少题（算学习速率时一起算）
 S.totalMs = S.totalMs || 0;
-S.milestoneAt = S.milestoneAt || 0;
+S.milestoneAt = S.milestoneAt || 0;   // 旧版累计时长里程碑，保留不用
+S.milestone = S.milestone || {d:'', at:0};   // 新版：每天的学习时长里程碑
 S.set = Object.assign({}, DEF, S.set || {});
 if ((S.set.v || 0) < 3) { if ((S.set.v || 0) < 2 && (S.set.idle === 45 || S.set.idle === 30)) S.set.idle = 90; S.set.v = 3; S.set.mode = 'stage'; }
 if (S.set.v < 4) { S.set.v = 4; S.set.chaps = []; S.set.topics = []; }
 if (S.set.v < 5) { S.set.v = 5; if (S.set.order === 'due') S.set.order = 'few'; }
 if (S.set.v < 6) { S.set.v = 6; if (!SUBJ[S.set.subj]) S.set.subj = 'bio'; }
 if (S.set.v < 7) { S.set.v = 7; }
+if (S.set.v < 8) { S.set.v = 8; }
 // 旧版是“掌握等级”，改成“背过几次”：r=背过次数，g=最近一次的结果，t=最近一次时间
 function migrate(rec) {
   if (rec && rec.r === undefined) {
@@ -1050,6 +1128,7 @@ function migrate(rec) {
 for (const id in S.cards) migrate(S.cards[id]);
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 const dk = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+if (S.milestone.d !== dk()) { S.milestone = {d: dk(), at: (S.ms[dk()] || 0)}; save(); }   // 换天了就从头算，不补放昨天的
 function streak() {
   let n = 0; const d = new Date();
   if (!S.log[dk(d)]) d.setDate(d.getDate() - 1);
@@ -1194,6 +1273,11 @@ function renderHome() {
     st += '<div class="stat"><b>' + (days >= 0 ? days + ' 天' : '已结束') + '</b><span>距离考试</span></div>';
   }
   $('#stats').innerHTML = st;
+  const nm = nextMilestone(), mh = $('#mhint');
+  if (mh) mh.textContent = nm
+    ? '今天的时间里程碑：' + nm.name + '，还差 ' + Math.max(1, Math.round((nm.m - todayMs()) / 60000)) + ' 分钟。'
+    : (todayMs() ? '今天的时间里程碑全部拿到了。' : '');
+  renderForecast();
   $('#water-seg').innerHTML = seg('water', [[0,'不提醒'],[30,'30 分钟'],[45,'45 分钟'],[60,'60 分钟']]);
   $('#noise-seg').innerHTML = seg('noise', [['off','关'],['brown','棕噪音'],['white','白噪音']]);
   if (curTab === 'ch') renderChapters();
@@ -1201,6 +1285,73 @@ function renderHome() {
   $('#btn-fs3').textContent = isFs() ? '退出全屏' : '进入全屏';
 }
 let curTab = 'go';
+/* ---------- 学习速率 · 考前还能背几遍 ---------- */
+function rateInfo() {
+  const sub = S.set.subj;
+  const dl = S.slog[sub] || {}, sk = S.skipS[sub] || {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let first = '';
+  for (const k in dl) if ((dl[k] || 0) > 0 && (!first || k < first)) first = k;
+  for (const k in sk) if ((sk[k] || 0) > 0 && (!first || k < first)) first = k;
+  let win = 14;                                  // 看最近两周，但不早于第一笔记录
+  if (first) {
+    const span = Math.floor((today - new Date(first + 'T00:00:00')) / 864e5) + 1;
+    win = Math.max(1, Math.min(14, span));
+  }
+  const days = []; let done = 0, skipped = 0;
+  for (let i = win - 1; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    const k = dk(d), a = dl[k] || 0, b = sk[k] || 0;
+    days.push({k:k, a:a, b:b, v:a + b});
+    done += a; skipped += b;
+  }
+  const total = C.filter(c => c.sub === sub).length;
+  const perDay = (done + skipped) / win;
+  let left = null, rounds = null;
+  if (S.set.exam) {
+    left = Math.ceil((new Date(S.set.exam + 'T00:00:00') - new Date()) / 864e5);
+    if (left > 0) rounds = total ? perDay * left / total : 0;
+  }
+  return {win:win, days:days, done:done, skipped:skipped, perDay:perDay, total:total, left:left, rounds:rounds};
+}
+const fmtN = x => x >= 10 ? String(Math.round(x)) : (Math.round(x * 10) / 10).toFixed(1);
+function renderForecast() {
+  const box = $('#forecast'); if (!box) return;
+  const r = rateInfo();
+  const mx = Math.max(1, ...r.days.map(d => d.v));
+  const t0 = dk();
+  const spark = r.days.map(d => '<i class="' + (d.k === t0 ? 't' : '') + '" style="height:' + Math.max(4, Math.round(d.v / mx * 100)) +
+    '%" title="' + d.k + '：背过 ' + d.a + ' 题，跳过 ' + d.b + ' 题"></i>').join('');
+  const rate = '最近 ' + r.win + ' 天平均每天 ' + fmtN(r.perDay) + ' 题（背过 ' + r.done + ' + 跳过 ' + r.skipped + '）';
+  let big, note, extra = '';
+  if (!r.perDay) {
+    big = '—<em>遍</em>';
+    note = '还没有足够的记录。先背两天，这里就会按你的真实速度估算。';
+  } else if (r.left == null) {
+    big = '—<em>遍</em>';
+    note = rate + '。在设置里填上考试日期，就能算出考前还能过几遍。';
+    extra = '按这个速度，' + fmtN(r.total / r.perDay) + ' 天能把全科过一遍。';
+  } else if (r.left <= 0) {
+    big = '0<em>天</em>';
+    note = '考试日期已经到了。' + rate + '。';
+  } else {
+    big = fmtN(r.rounds) + '<em>遍</em>';
+    note = rate + '。全科 ' + r.total + ' 题，还剩 ' + r.left + ' 天。';
+    const need1 = Math.ceil(r.total / r.left), target = r.rounds >= 3 ? 3 : 2;
+    extra = '考前过完一遍要每天 ' + need1 + ' 题；想过 ' + target + ' 遍，每天得 ' + need1 * target + ' 题。';
+  }
+  const rn = Math.round((r.rounds || 0) * 10) / 10, pills = Math.min(8, Math.ceil(rn));
+  let bars = '';
+  for (let i = 0; i < pills; i++) {
+    const full = i + 1 <= Math.floor(rn);
+    bars += full ? '<i class="f"></i>' : '<i class="p" style="--p:' + Math.round(Math.max(0, Math.min(1, rn - i)) * 100) + '%"></i>';
+  }
+  box.innerHTML = '<div class="fc"><h4>考前还能背几遍</h4><div class="big">' + big + '</div><p class="note">' + note + '</p>' +
+    (bars ? '<div class="rnds" aria-hidden="true">' + bars + '</div>' : '') +
+    '<div class="spark" aria-hidden="true">' + spark + '</div>' +
+    '<div class="cap"><span>' + r.win + ' 天前</span><span>每天：背过 + 跳过</span><span>今天</span></div>' +
+    (extra ? '<p class="note" style="margin-top:8px">' + extra + '</p>' : '') + '</div>';
+}
 function setTab(name) {
   curTab = name;
   ['go', 'ch', 'me'].forEach(k => { $('#tab-' + k).hidden = k !== name; });
@@ -1492,7 +1643,10 @@ function skip() {
     sfx.good(1);
   } else {
     if (!ses.res[c.id]) ses.res[c.id] = 's';
-    S.skipped[c.id] = true; save();
+    S.skipped[c.id] = true;
+    const sm = S.skipS[c.sub] || (S.skipS[c.sub] = {});
+    sm[dk()] = (sm[dk()] || 0) + 1;   // 跳过也算“过了一遍”，计入学习速率
+    save();
   }
   ses.i++;
   if (ses.i >= ses.queue.length) finish(); else { showCard(); updateSegs(); }
@@ -1557,15 +1711,24 @@ setInterval(() => {
   if (idle > 0 && now - lastActive > idle * 1000 && !nudgeOpen && !waterOpen) openNudge('idle');
 }, 200);
 
-/* ---------- milestones ---------- */
-const MILESTONES = [30*60*1000, 60*60*1000, 2*60*60*1000, 5*60*60*1000, 10*60*60*1000];
-const MILESTONE_NAMES = ['30分钟', '1小时', '2小时', '5小时', '10小时'];
+/* ---------- 每日学习时长里程碑（每天零点重新开始） ---------- */
+const MILESTONES = [15, 30, 60, 90, 120, 180, 240, 360].map(m => m * 60000);
+const MILESTONE_NAMES = ['15 分钟', '半小时', '1 小时', '1.5 小时', '2 小时', '3 小时', '4 小时', '6 小时'];
+function todayMs() { return (S.ms && S.ms[dk()]) || 0; }
+function nextMilestone() {
+  const t = todayMs();
+  for (let i = 0; i < MILESTONES.length; i++) if (t < MILESTONES[i]) return {m: MILESTONES[i], name: MILESTONE_NAMES[i]};
+  return null;
+}
 function checkMilestones() {
   if (!S.set.fx || !ses || ses.done || screen !== 'study') return;
+  const day = dk();
+  if (!S.milestone || S.milestone.d !== day) { S.milestone = {d: day, at: 0}; save(); }
+  const ms = todayMs();
   for (let i = 0; i < MILESTONES.length; i++) {
     const m = MILESTONES[i];
-    if (S.totalMs >= m && (S.milestoneAt || 0) < m) {
-      S.milestoneAt = m; save();
+    if (ms >= m && (S.milestone.at || 0) < m) {
+      S.milestone.at = m; save();
       celebrateMilestone(MILESTONE_NAMES[i]);
       break;
     }
@@ -1577,7 +1740,7 @@ function celebrateMilestone(name) {
   const alive = () => FX.token() === tk;
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;inset:0;z-index:1000;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;';
-  el.innerHTML = '<div style="font-size:clamp(28px,6vw,56px);font-weight:800;background:linear-gradient(180deg,var(--gold1),var(--gold2),var(--gold3));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 20px rgba(255,176,0,.4));animation:mTitleIn .7s cubic-bezier(.2,1.5,.4,1) both;">累计学习 ' + esc(name) + '！</div><div style="margin-top:12px;font-size:16px;color:var(--ink2);animation:mSubIn .7s .25s cubic-bezier(.2,1.5,.4,1) both;">继续加油，下一个里程碑在向你招手</div>';
+  el.innerHTML = '<div style="font-size:clamp(28px,6vw,56px);font-weight:800;background:linear-gradient(180deg,var(--gold1),var(--gold2),var(--gold3));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 20px rgba(255,176,0,.4));animation:mTitleIn .7s cubic-bezier(.2,1.5,.4,1) both;">今天学了 ' + esc(name) + '！</div><div style="margin-top:12px;font-size:16px;color:var(--ink2);animation:mSubIn .7s .25s cubic-bezier(.2,1.5,.4,1) both;">站起来走两步，喝口水，再回来接着背</div>';
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 4200);
   const W = window.innerWidth, H = window.innerHeight;
@@ -2174,7 +2337,7 @@ $('#sheet-body').addEventListener('click', e => {
   }
   if (e.target.id === 'exam-clear') { S.set.exam = ''; save(); renderSheet(); renderHome(); return; }
   if (e.target.id === 'btn-exp') {
-    const data = JSON.stringify({v:2, cards:S.cards, log:S.log, stars:S.stars, ms:S.ms, slog:S.slog, msS:S.msS, water:S.water, skipped:S.skipped, totalMs:S.totalMs, milestoneAt:S.milestoneAt});
+    const data = JSON.stringify({v:2, cards:S.cards, log:S.log, stars:S.stars, ms:S.ms, slog:S.slog, msS:S.msS, water:S.water, skipped:S.skipped, skipS:S.skipS, totalMs:S.totalMs, milestoneAt:S.milestoneAt, milestone:S.milestone});
     $('#bk').value = data;
     try { navigator.clipboard.writeText(data).then(() => toast('已复制到剪贴板'), () => toast('请长按文本框，手动全选复制')); } catch (er) { toast('请长按文本框，手动全选复制'); }
     return;
@@ -2182,7 +2345,7 @@ $('#sheet-body').addEventListener('click', e => {
   if (e.target.id === 'btn-imp') { importBackup($('#bk').value); return; }
   if (e.target.id === 'btn-wipe') {
     if (!wipeArmed) { wipeArmed = true; renderSheet(); setTimeout(() => { wipeArmed = false; if (!$('#sheet').hidden) renderSheet(); }, 4000); }
-    else { wipeArmed = false; S.cards = {}; S.log = {}; S.stars = {}; S.ms = {}; S.slog = {bio:{}, mic:{}}; S.msS = {bio:{}, mic:{}}; S.water = {cups:{}}; S.skipped = {}; S.totalMs = 0; S.milestoneAt = 0; save(); renderSheet(); renderHome(); }
+    else { wipeArmed = false; S.cards = {}; S.log = {}; S.stars = {}; S.ms = {}; S.slog = {bio:{}, mic:{}}; S.msS = {bio:{}, mic:{}}; S.water = {cups:{}}; S.skipped = {}; S.skipS = {}; S.totalMs = 0; S.milestoneAt = 0; S.milestone = {d: dk(), at: 0}; save(); renderSheet(); renderHome(); }
   }
 });
 const closeSheet = () => { $('#sheet').hidden = true; wipeArmed = false; };
@@ -2322,6 +2485,8 @@ function importBackup(txt) {
   for (const k in (d.stars || {})) S.stars[k] = 1;
   for (const k in ((d.water && d.water.cups) || {})) S.water.cups[k] = Math.max(S.water.cups[k] || 0, d.water.cups[k]);
   for (const k in (d.skipped || {})) S.skipped[k] = true;
+  for (const sb in (d.skipS || {})) { const t = S.skipS[sb] || (S.skipS[sb] = {}); for (const k in d.skipS[sb]) t[k] = Math.max(t[k] || 0, d.skipS[sb][k]); }
+  if (d.milestone && d.milestone.d === dk()) S.milestone.at = Math.max(S.milestone.at || 0, d.milestone.at || 0);
   if (d.totalMs) S.totalMs = Math.max(S.totalMs || 0, d.totalMs);
   if (d.milestoneAt) S.milestoneAt = Math.max(S.milestoneAt || 0, d.milestoneAt);
   save(); renderHome(); toast('已导入，和这里原有的进度合并了。');
